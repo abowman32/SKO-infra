@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 {
+  CBUSER="corbolj" #Edit if you are not corbolj
   CLUSTER="skoflow"
-  CBUSER="corbolj"
 }
 
 {
@@ -63,6 +63,41 @@ sleep 60
   helm repo add elastic https://helm.elastic.co
   helm install elasticsearch elastic/elasticsearch \
     --namespace $ESNS
+}
+
+{
+  CORENS='cloudbees-core'
+  kubectl create namespace $CORENS
+  kubectl label  namespace $CORENS name=$CORENS
+  kubectl config set-context $(kubectl config current-context) --namespace=$CORENS
+}
+
+{
+  kubectl create -f ssd-storage.yaml
+  kubectl patch storageclass standard -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+  kubectl patch storageclass ssd -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+  kubectl create clusterrolebinding cluster-admin-binding --clusterrole cluster-admin --user $(gcloud config get-value account)
+}
+
+{
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/mandatory.yaml
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/provider/cloud-generic.yaml
+}
+
+sleep 120
+
+{
+  CLOUDBEES_CORE_IP=$(kubectl -n ingress-nginx get service ingress-nginx -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
+  DOMAIN_NAME="jenkins.$CLOUDBEES_CORE_IP.xip.io"
+}
+
+{
+  helm install cloudbees-core \
+    cloudbees/cloudbees-core \
+    --set OperationsCenter.HostName=$DOMAIN_NAME \
+    --set OperationsCenter.ServiceType='ClusterIP' \
+    --namespace=$CORENS \
+    --values=sko.yml
 }
 
 # Verify
