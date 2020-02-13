@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 
+# REQUIRED VARIABLES
 {
   CBUSER="corbolj" #Edit if you are not corbolj
-  CLUSTER="skoflow"
+  CLUSTER="skoflow" #
+  FQDN="PUT_YOUR_FQDN_HERE"
 }
 
+# Step 0 - Cluster Provisioning
+# TODO: This currently over-provisions.
+# We need 4 x n1-standard-4 (zonal is OK for SKO)
 {
   gcloud container clusters create $CLUSTER-$CBUSER \
     --machine-type=n1-standard-4 \
@@ -17,6 +22,7 @@
   kubectl create clusterrolebinding cluster-admin-binding --clusterrole cluster-admin --user $(gcloud config get-value account)
 }
 
+# Step 1 - MySQL
 {
   MYSQLNS=mysql
   kubectl create namespace $MYSQLNS
@@ -46,6 +52,7 @@ sleep 60
     -Bse \"FLUSH PRIVILEGES\""
 }
 
+# MySQL Outputs
 {
   DB_Endpoint='flow-mysql.mysql.svc.cluster.local'
   #Dbname=
@@ -53,6 +60,10 @@ sleep 60
   dbPassword='password'
 }
 
+# Step 2: FQDN 
+# You need a FQDN, put it in the required variables in step 0
+
+# Step 3: ElasticSearch
 {
   ESNS=elasticsearch
   kubectl create namespace $ESNS
@@ -65,6 +76,54 @@ sleep 60
     --namespace $ESNS
 }
 
+# Verify
+## kubectl get pods --namespace=elasticsearch -l app=elasticsearch-master -w
+# this will take a second to complete successfully
+# helm test elasticsearch
+
+# ES Outputs
+# TODO: Get the ES endpoint
+echo elastic search service endpoint: 
+kubectl get svc -n $ESNS
+
+# Step 4: RWX storage (NFS for GKE)
+
+# A single filestore needs to exist in the project. These are project-wide. 
+# ps-dev already has one in us-central1-a
+# if the this won't work, you'll need to install the gcloud beta tools and use the following:
+
+# Create File Store
+# FS=nfs
+# gcloud beta filestore instances create ${FS} \
+#     --project=${PROJECT} \
+#     --zone=${ZONE} \
+#     --tier=STANDARD \
+#     --file-share=name="volumes",capacity=1TB \
+#     --network=name="default"
+# FSADDR=$(gcloud beta filestore instances describe ${FS} \
+#      --project=${PROJECT} \
+#      --zone=${ZONE} \
+#      --format="value(networks.ipAddresses[0])")
+
+# Change this to the correct FSADDR as needed 
+FSADDR=10.89.48.58
+
+helm install stable/nfs-client-provisioner --name nfs-cp --set nfs.server=${FSADDR} --set nfs.path=/volumes
+
+# Step 5: RWO storage
+
+# TODO: Does anything need to be done here? Is standard type underperformant for flow or does it need ssd?
+# Provision ssd storage if we do need it
+# {
+#   kubectl create -f ssd-storage.yaml
+#   kubectl patch storageclass standard -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+#   kubectl patch storageclass ssd -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
+# }
+
+# Step 6: Core Modern
+
+DOMAIN_NAME="core.$FQDN"   # change as desired
+
 {
   CORENS='cloudbees-core'
   kubectl create namespace $CORENS
@@ -72,35 +131,29 @@ sleep 60
   kubectl config set-context $(kubectl config current-context) --namespace=$CORENS
 }
 
-{
-  kubectl create -f ssd-storage.yaml
-  kubectl patch storageclass standard -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
-  kubectl patch storageclass ssd -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
-  kubectl create clusterrolebinding cluster-admin-binding --clusterrole cluster-admin --user $(gcloud config get-value account)
-}
+# Manual ingress creation. YMMV here. Remove the nginx-ingress.Enabled=true from the install command if you're deploying manually. 
+# {
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/mandatory.yaml
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/provider/cloud-generic.yaml
+# }
+#
+# sleep 120
+#
+# {
+#   CLOUDBEES_CORE_IP=$(kubectl -n ingress-nginx get service ingress-nginx -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
+#   DOMAIN_NAME="jenkins.$CLOUDBEES_CORE_IP.xip.io"
+# }
+#
 
-{
-  kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/mandatory.yaml
-  kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/nginx-0.23.0/deploy/provider/cloud-generic.yaml
-}
+helm install cloudbees-core \
+  cloudbees/cloudbees-core \
+  --set nginx-ingress.Enabled=true \
+  --set OperationsCenter.Platform=gke \
+  --set OperationsCenter.HostName=$DOMAIN_NAME \
+  --namespace=$CORENS
 
-sleep 120
+# Output prereq values
 
-{
-  CLOUDBEES_CORE_IP=$(kubectl -n ingress-nginx get service ingress-nginx -o jsonpath="{.status.loadBalancer.ingress[0].ip}")
-  DOMAIN_NAME="jenkins.$CLOUDBEES_CORE_IP.xip.io"
-}
+# Teardown steps
 
-{
-  helm install cloudbees-core \
-    cloudbees/cloudbees-core \
-    --set OperationsCenter.HostName=$DOMAIN_NAME \
-    --set OperationsCenter.ServiceType='ClusterIP' \
-    --namespace=$CORENS \
-    --values=sko.yml
-}
-
-# Verify
-# kubectl get pods --namespace=elasticsearch -l app=elasticsearch-master -w
-# helm test elasticsearch
 #gcloud container clusters delete $CLUSTER-$CBUSER --region us-east1
