@@ -114,7 +114,7 @@ kubectl get svc -n $ESNS
 # Change this to the correct FSADDR as needed 
 FSADDR=10.89.48.58
 
-helm install stable/nfs-client-provisioner --name nfs-cp --set nfs.server=${FSADDR} --set nfs.path=/volumes
+helm install nfs-cp stable/nfs-client-provisioner --set nfs.server=${FSADDR} --set nfs.path=/volumes
 
 # Step 5: RWO storage
 
