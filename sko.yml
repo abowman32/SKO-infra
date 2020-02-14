@@ -1,8 +1,0 @@
-nginx-ingress:
-  Enabled: true
-OperationsCenter:
-  # Platform enables specific settings, option defaults standard
-  # platform specific values are: eks, aws, gke, aks, pks, openshift
-  Platform: gke
-  # The hostname used to access Operations Center through the ingress controller.
-  #HostName: core.cloudbees.guerrilla.systems

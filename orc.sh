@@ -31,7 +31,8 @@
 }
 
 helm install flow-mysql stable/mysql \
-  --namespace $MYSQLNS
+  --namespace $MYSQLNS \
+  -f mysql-values.yaml
 
 kubectl run jumpbox sleep 30000 --image=ubuntu:16.04 --restart=Never --generator=run-pod/v1 --namespace $MYSQLNS
 
@@ -50,6 +51,11 @@ sleep 60
     -Bse \"GRANT ALL PRIVILEGES ON * . * TO 'flowuser'@'localhost'\""
   kubectl exec jumpbox -- sh -c "mysql -h flow-mysql -P${MYSQL_PORT} -u root -p${MYSQL_ROOT_PASSWORD} \
     -Bse \"FLUSH PRIVILEGES\""
+  kubectl exec jumpbox -- sh -c "mysql -h flow-mysql -P${MYSQL_PORT} -u root -p${MYSQL_ROOT_PASSWORD} \
+    -Bse \"SHOW VARIABLES LIKE '%character%';SHOW VARIABLES LIKE '%collation%';\""
+  echo ""
+  echo "All above character sets should be set to UTF8 (except for filesystem, which should be set to binary)"
+    
 }
 
 # MySQL Outputs
